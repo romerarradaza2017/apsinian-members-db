@@ -547,7 +547,7 @@ export default function App() {
             <Shield size={32} />
           </div>
           <h2 className="text-xl font-bold text-slate-900 mb-1">Apsinian Beta Chapter</h2>
-          <p className="text-xs text-slate-500 mb-6">Enter secret passcode (`apsinianunity`) to access database</p>
+          <p className="text-xs text-slate-500 mb-6">Enter secret passcode to access database</p>
           
           <form onSubmit={handleAccessSubmit} className="space-y-4">
             <input 

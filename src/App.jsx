@@ -303,7 +303,7 @@ return matchesSearch && matchesBlood;
 
 });
 
-// If not unlocked, show the strict entrance password gate
+// If not unlocked, show strict entrance password gate
 if (!isUnlocked) {
 return (
 

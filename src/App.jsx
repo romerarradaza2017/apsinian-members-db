@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, AlertTriangle, Camera, Filter } from 'lucide-react';
+import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, AlertTriangle, Camera, Filter, Calendar, CheckSquare, Image as ImageIcon, Eye } from 'lucide-react';
 
 const getEnvVar = (key, fallback) => {
   try {
@@ -31,14 +31,18 @@ try {
   console.warn("Firebase failed to initialize, using local mode.");
 }
 
-const LOCAL_STORAGE_KEY = 'apsinian_members_fallback';
+const LOCAL_STORAGE_MEMBERS = 'apsinian_members_fallback';
+const LOCAL_STORAGE_ACTIVITIES = 'apsinian_activities_fallback';
 
 export default function App() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [accessPasswordInput, setAccessPasswordInput] = useState('');
   const [accessError, setAccessError] = useState(false);
 
+  const [activeTab, setActiveTab] = useState('members'); // 'members' or 'activities'
+
   const [members, setMembers] = useState([]);
+  const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
@@ -47,6 +51,7 @@ export default function App() {
   const [bloodFilter, setBloodFilter] = useState('ALL');
   const [isUsingLocal, setIsUsingLocal] = useState(false);
   
+  // Member Form State
   const [showFormModal, setShowFormModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [formData, setFormData] = useState({
@@ -59,6 +64,20 @@ export default function App() {
     mobile: '',
     photo: ''
   });
+
+  // Activity Form State
+  const [showActivityModal, setShowActivityModal] = useState(false);
+  const [editingActivityId, setEditingActivityId] = useState(null);
+  const [activityData, setActivityData] = useState({
+    title: '',
+    targetDate: '',
+    description: '',
+    photos: [], // array of base64 strings (max 5)
+    accomplished: false
+  });
+
+  // Full Screen Image Lightbox State
+  const [fullscreenImage, setFullscreenImage] = useState(null);
 
   const [confirmConfig, setConfirmConfig] = useState({
     isOpen: false,
@@ -76,40 +95,38 @@ export default function App() {
 
   useEffect(() => {
     if (isUnlocked) {
-      fetchMembers();
+      fetchAllData();
     }
   }, [isUnlocked]);
 
-  const handleAccessSubmit = (e) => {
-    e.preventDefault();
-    if (accessPasswordInput === 'apsinianunity') {
-      setIsUnlocked(true);
-      setAccessError(false);
-      showToast("Access granted successfully!");
-    } else {
-      setAccessError(true);
-    }
-  };
-
-  const fetchMembers = async () => {
+  const fetchAllData = async () => {
     setLoading(true);
     try {
       const projId = getEnvVar('VITE_FIREBASE_PROJECT_ID', '');
       if (!projId || !db) {
         throw new Error("No Firebase config");
       }
-      const querySnapshot = await getDocs(collection(db, 'members'));
-      const items = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setMembers(items);
+      
+      // Fetch members
+      const memberSnapshot = await getDocs(collection(db, 'members'));
+      const memberItems = memberSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMembers(memberItems);
+
+      // Fetch activities
+      const activitySnapshot = await getDocs(collection(db, 'activities'));
+      const activityItems = activitySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setActivities(activityItems);
+
       setIsUsingLocal(false);
     } catch (error) {
       console.log("Switching to Local Storage mode.");
       setIsUsingLocal(true);
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (saved) {
-        setMembers(JSON.parse(saved));
+      
+      const savedMembers = localStorage.getItem(LOCAL_STORAGE_MEMBERS);
+      if (savedMembers) {
+        setMembers(JSON.parse(savedMembers));
       } else {
-        const sample = [{
+        const sampleMembers = [{
           id: '1',
           name: 'Juan Dela Cruz',
           dob: '1995-05-15',
@@ -120,11 +137,38 @@ export default function App() {
           mobile: '09123456789',
           photo: ''
         }];
-        setMembers(sample);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sample));
+        setMembers(sampleMembers);
+        localStorage.setItem(LOCAL_STORAGE_MEMBERS, JSON.stringify(sampleMembers));
+      }
+
+      const savedActivities = localStorage.getItem(LOCAL_STORAGE_ACTIVITIES);
+      if (savedActivities) {
+        setActivities(JSON.parse(savedActivities));
+      } else {
+        const sampleActivities = [{
+          id: 'act-1',
+          title: 'Annual Coastal Cleanup Drive',
+          targetDate: '2026-08-15',
+          description: 'Gathering all chapter members for environmental coastal cleaning in Mactan.',
+          photos: [],
+          accomplished: false
+        }];
+        setActivities(sampleActivities);
+        localStorage.setItem(LOCAL_STORAGE_ACTIVITIES, JSON.stringify(sampleActivities));
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAccessSubmit = (e) => {
+    e.preventDefault();
+    if (accessPasswordInput === 'apsinianunity') {
+      setIsUnlocked(true);
+      setAccessError(false);
+      showToast("Access granted successfully!");
+    } else {
+      setAccessError(true);
     }
   };
 
@@ -140,10 +184,7 @@ export default function App() {
     }
   };
 
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
+  const compressImageFile = (file, callback) => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const img = new Image();
@@ -172,19 +213,67 @@ export default function App() {
         ctx.drawImage(img, 0, 0, width, height);
         
         const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-        setFormData(prev => ({ ...prev, photo: dataUrl }));
+        callback(dataUrl);
       };
       img.src = event.target.result;
     };
     reader.readAsDataURL(file);
   };
 
-  const handleSubmitForm = (e) => {
+  const handleMemberImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    compressImageFile(file, (dataUrl) => {
+      setFormData(prev => ({ ...prev, photo: dataUrl }));
+    });
+  };
+
+  const handleActivityMultipleImageUpload = (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    const currentCount = activityData.photos.length;
+    const remainingSlots = 5 - currentCount;
+    if (remainingSlots <= 0) {
+      showToast("Maximum of 5 photos allowed per activity.", "error");
+      return;
+    }
+
+    const filesToProcess = files.slice(0, remainingSlots);
+    filesToProcess.forEach(file => {
+      compressImageFile(file, (dataUrl) => {
+        setActivityData(prev => {
+          if (prev.photos.length >= 5) return prev;
+          return { ...prev, photos: [...prev.photos, dataUrl] };
+        });
+      });
+    });
+  };
+
+  const removeActivityPhoto = (index) => {
+    setActivityData(prev => ({
+      ...prev,
+      photos: prev.photos.filter((_, i) => i !== index)
+    }));
+  };
+
+  const calculateAge = (dobString) => {
+    if (!dobString) return 'N/A';
+    const today = new Date();
+    const birthDate = new Date(dobString);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return isNaN(age) ? 'N/A' : `${age} yrs old`;
+  };
+
+  const handleSubmitMemberForm = (e) => {
     e.preventDefault();
-    
     const phMobileRegex = /^(09|\+639)\d{9}$/;
     if (!phMobileRegex.test(formData.mobile)) {
-      showToast("Please enter a valid PH mobile number (e.g., 09123456789 or +639123456789)", "error");
+      showToast("Please enter a valid PH mobile number (e.g., 09123456789)", "error");
       return;
     }
 
@@ -193,11 +282,11 @@ export default function App() {
       isOpen: true,
       title: isEdit ? "Confirm Update Record" : "Confirm Add New Record",
       message: `Are you sure you want to ${isEdit ? 'update' : 'add'} records for ${formData.name}?`,
-      onConfirm: executeSave
+      onConfirm: executeSaveMember
     });
   };
 
-  const executeSave = async () => {
+  const executeSaveMember = async () => {
     try {
       if (!isUsingLocal && db) {
         if (editingId) {
@@ -217,30 +306,30 @@ export default function App() {
           updatedList = [...members, { id: newId, ...formData }];
         }
         setMembers(updatedList);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedList));
+        localStorage.setItem(LOCAL_STORAGE_MEMBERS, JSON.stringify(updatedList));
       }
       
-      showToast(editingId ? "Record updated successfully!" : "New member added successfully!");
+      showToast(editingId ? "Member record successfully updated!" : "Member successfully added!");
       setShowFormModal(false);
-      resetForm();
+      resetMemberForm();
     } catch (error) {
-      console.error("Error saving record:", error);
+      console.error("Error saving member:", error);
       showToast("Error saving record", "error");
     } finally {
       setConfirmConfig({ isOpen: false });
     }
   };
 
-  const handleDeleteClick = (id, name) => {
+  const handleDeleteMemberClick = (id, name) => {
     setConfirmConfig({
       isOpen: true,
       title: "Confirm Delete Record",
       message: `Are you sure you want to delete ${name}? This action cannot be undone.`,
-      onConfirm: () => executeDelete(id)
+      onConfirm: () => executeDeleteMember(id)
     });
   };
 
-  const executeDelete = async (id) => {
+  const executeDeleteMember = async (id) => {
     try {
       if (!isUsingLocal && db) {
         await deleteDoc(doc(db, 'members', id));
@@ -248,18 +337,18 @@ export default function App() {
       const updatedList = members.filter(m => m.id !== id);
       setMembers(updatedList);
       if (isUsingLocal) {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedList));
+        localStorage.setItem(LOCAL_STORAGE_MEMBERS, JSON.stringify(updatedList));
       }
-      showToast("Record deleted successfully!");
+      showToast("Member record successfully deleted!");
     } catch (error) {
-      console.error("Error deleting record:", error);
+      console.error("Error deleting member:", error);
       showToast("Error deleting record", "error");
     } finally {
       setConfirmConfig({ isOpen: false });
     }
   };
 
-  const resetForm = () => {
+  const resetMemberForm = () => {
     setFormData({
       name: '',
       dob: '',
@@ -273,7 +362,7 @@ export default function App() {
     setEditingId(null);
   };
 
-  const openEditModal = (member) => {
+  const openEditMemberModal = (member) => {
     if (!isAdmin) {
       setShowAdminModal(true);
       return;
@@ -292,14 +381,135 @@ export default function App() {
     setShowFormModal(true);
   };
 
+  const handleSubmitActivityForm = (e) => {
+    e.preventDefault();
+    const isEdit = !!editingActivityId;
+    setConfirmConfig({
+      isOpen: true,
+      title: isEdit ? "Confirm Update Activity" : "Confirm Add New Activity",
+      message: `Are you sure you want to ${isEdit ? 'update' : 'add'} activity "${activityData.title}"?`,
+      onConfirm: executeSaveActivity
+    });
+  };
+
+  const executeSaveActivity = async () => {
+    try {
+      if (!isUsingLocal && db) {
+        if (editingActivityId) {
+          const docRef = doc(db, 'activities', editingActivityId);
+          await updateDoc(docRef, activityData);
+          setActivities(activities.map(a => a.id === editingActivityId ? { id: editingActivityId, ...activityData } : a));
+        } else {
+          const docRef = await addDoc(collection(db, 'activities'), activityData);
+          setActivities([...activities, { id: docRef.id, ...activityData }]);
+        }
+      } else {
+        let updatedList;
+        if (editingActivityId) {
+          updatedList = activities.map(a => a.id === editingActivityId ? { id: editingActivityId, ...activityData } : a);
+        } else {
+          const newId = 'act-' + Date.now();
+          updatedList = [...activities, { id: newId, ...activityData }];
+        }
+        setActivities(updatedList);
+        localStorage.setItem(LOCAL_STORAGE_ACTIVITIES, JSON.stringify(updatedList));
+      }
+      
+      showToast(editingActivityId ? "Activity successfully updated!" : "Activity successfully added!");
+      setShowActivityModal(false);
+      resetActivityForm();
+    } catch (error) {
+      console.error("Error saving activity:", error);
+      showToast("Error saving activity", "error");
+    } finally {
+      setConfirmConfig({ isOpen: false });
+    }
+  };
+
+  const handleToggleAccomplished = async (activity) => {
+    if (!isAdmin) {
+      setShowAdminModal(true);
+      return;
+    }
+    const updatedStatus = !activity.accomplished;
+    try {
+      if (!isUsingLocal && db) {
+        const docRef = doc(db, 'activities', activity.id);
+        await updateDoc(docRef, { accomplished: updatedStatus });
+      }
+      const updatedList = activities.map(a => a.id === activity.id ? { ...a, accomplished: updatedStatus } : a);
+      setActivities(updatedList);
+      if (isUsingLocal) {
+        localStorage.setItem(LOCAL_STORAGE_ACTIVITIES, JSON.stringify(updatedList));
+      }
+      showToast(updatedStatus ? "Activity marked as Accomplished!" : "Activity marked as Pending.");
+    } catch (error) {
+      console.error("Error updating accomplishment status:", error);
+      showToast("Error updating status", "error");
+    }
+  };
+
+  const handleDeleteActivityClick = (id, title) => {
+    setConfirmConfig({
+      isOpen: true,
+      title: "Confirm Delete Activity",
+      message: `Are you sure you want to delete activity "${title}"?`,
+      onConfirm: () => executeDeleteActivity(id)
+    });
+  };
+
+  const executeDeleteActivity = async (id) => {
+    try {
+      if (!isUsingLocal && db) {
+        await deleteDoc(doc(db, 'activities', id));
+      }
+      const updatedList = activities.filter(a => a.id !== id);
+      setActivities(updatedList);
+      if (isUsingLocal) {
+        localStorage.setItem(LOCAL_STORAGE_ACTIVITIES, JSON.stringify(updatedList));
+      }
+      showToast("Activity successfully deleted!");
+    } catch (error) {
+      console.error("Error deleting activity:", error);
+      showToast("Error deleting activity", "error");
+    } finally {
+      setConfirmConfig({ isOpen: false });
+    }
+  };
+
+  const resetActivityForm = () => {
+    setActivityData({
+      title: '',
+      targetDate: '',
+      description: '',
+      photos: [],
+      accomplished: false
+    });
+    setEditingActivityId(null);
+  };
+
+  const openEditActivityModal = (act) => {
+    if (!isAdmin) {
+      setShowAdminModal(true);
+      return;
+    }
+    setEditingActivityId(act.id);
+    setActivityData({
+      title: act.title || '',
+      targetDate: act.targetDate || '',
+      description: act.description || '',
+      photos: act.photos || [],
+      accomplished: !!act.accomplished
+    });
+    setShowActivityModal(true);
+  };
+
   const filteredMembers = members.filter(m => {
     const matchesSearch = 
       m.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       m.currentAddress?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       m.mobile?.includes(searchTerm);
-
     const matchesBlood = bloodFilter === 'ALL' || m.bloodType === bloodFilter;
-
     return matchesSearch && matchesBlood;
   });
 
@@ -342,9 +552,20 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-12">
       {toast && (
-        <div className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-lg text-white font-medium flex items-center gap-2 transition-all ${toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`}>
-          {toast.type === 'error' ? <AlertTriangle size={20} /> : <CheckCircle size={20} />}
+        <div className="fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-lg text-white font-medium flex items-center gap-2 transition-all bg-emerald-600">
+          <CheckCircle size={20} />
           {toast.message}
+        </div>
+      )}
+
+      {fullscreenImage && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={() => setFullscreenImage(null)}>
+          <div className="relative max-w-4xl max-h-[90vh]">
+            <button onClick={() => setFullscreenImage(null)} className="absolute -top-10 right-0 text-white hover:text-gray-300 text-xl font-bold">
+              <X size={28} />
+            </button>
+            <img src={fullscreenImage} alt="Fullscreen preview" className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" />
+          </div>
         </div>
       )}
 
@@ -354,7 +575,7 @@ export default function App() {
             <h1 className="text-2xl font-bold tracking-wide flex items-center gap-2">
               <Shield className="text-indigo-400" /> Apsinian Beta Chapter
             </h1>
-            <p className="text-indigo-200 text-sm mt-1">Members Database & Directory</p>
+            <p className="text-indigo-200 text-sm mt-1">Members Database & Chapter Activities Directory</p>
           </div>
           
           <div className="flex items-center gap-3">
@@ -372,133 +593,249 @@ export default function App() {
               </button>
             )}
 
-            <button 
-              onClick={() => { resetForm(); setShowFormModal(true); }}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium shadow transition"
-            >
-              <UserPlus size={18} /> Add Member
-            </button>
+            {activeTab === 'members' ? (
+              <button 
+                onClick={() => { resetMemberForm(); setShowFormModal(true); }}
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium shadow transition"
+              >
+                <UserPlus size={18} /> Add Member
+              </button>
+            ) : (
+              <button 
+                onClick={() => { resetActivityForm(); setShowActivityModal(true); }}
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium shadow transition"
+              >
+                <Calendar size={18} /> Add Activity
+              </button>
+            )}
           </div>
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="max-w-7xl mx-auto px-4 flex border-t border-indigo-800/60 gap-6">
+          <button 
+            onClick={() => setActiveTab('members')}
+            className={`py-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${activeTab === 'members' ? 'border-amber-400 text-amber-300' : 'border-transparent text-indigo-200 hover:text-white'}`}
+          >
+            <Shield size={16} /> Members Directory ({members.length})
+          </button>
+          <button 
+            onClick={() => setActiveTab('activities')}
+            className={`py-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${activeTab === 'activities' ? 'border-amber-400 text-amber-300' : 'border-transparent text-indigo-200 hover:text-white'}`}
+          >
+            <Calendar size={16} /> Chapter Activities ({activities.length})
+          </button>
         </div>
       </header>
 
+      {}
       <main className="max-w-7xl mx-auto px-4 mt-8">
-        <div className="bg-white rounded-xl shadow-sm p-4 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="relative w-full md:w-96">
-            <Search className="absolute left-3 top-3 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="Search by name, address, or mobile..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-            />
-          </div>
+        {activeTab === 'members' ? (
+          <div>
+            <div className="bg-white rounded-xl shadow-sm p-4 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="relative w-full md:w-96">
+                <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+                <input 
+                  type="text" 
+                  placeholder="Search by name, address, or mobile..." 
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
 
-          <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
-            <div className="flex items-center gap-2">
-              <Filter size={16} className="text-slate-400" />
-              <select
-                value={bloodFilter}
-                onChange={(e) => setBloodFilter(e.target.value)}
-                className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="ALL">All Blood Types</option>
-                <option value="NA">NA</option>
-                <option value="A+">A+</option>
-                <option value="A-">A-</option>
-                <option value="B+">B+</option>
-                <option value="B-">B-</option>
-                <option value="AB+">AB+</option>
-                <option value="AB-">AB-</option>
-                <option value="O+">O+</option>
-                <option value="O-">O-</option>
-              </select>
-            </div>
-
-            <div className="text-sm text-slate-500 flex items-center gap-2">
-              <span>Total: <strong className="text-slate-800">{filteredMembers.length}</strong></span>
-              {isUsingLocal && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Local</span>}
-            </div>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="text-center py-20 text-slate-500 font-medium">Loading database records...</div>
-        ) : filteredMembers.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-xl shadow-sm border border-slate-100">
-            <p className="text-slate-500 font-medium">No member records found.</p>
-            <p className="text-slate-400 text-sm mt-1">Try adjusting your search or blood type filter.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredMembers.map(member => (
-              <div key={member.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
-                <div className="p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-16 h-16 rounded-full bg-slate-200 flex-shrink-0 overflow-hidden border border-slate-300 flex items-center justify-center">
-                      {member.photo ? (
-                        <img src={member.photo} alt={member.name} className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="text-xl font-bold text-slate-500">{member.name?.[0]?.toUpperCase()}</span>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-lg text-slate-900 truncate">{member.name}</h3>
-                      <p className="text-xs text-indigo-600 font-semibold mt-0.5">Blood Type: {member.bloodType || 'NA'}</p>
-                      <p className="text-xs text-slate-500 mt-1">Year Survive: <span className="font-medium text-slate-700">{member.yearSurvive || 'N/A'}</span></p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-1.5 text-sm border-t border-slate-100 pt-3">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400 text-xs">DOB:</span>
-                      <span className="font-medium text-slate-700">{member.dob || 'N/A'}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400 text-xs">Mobile:</span>
-                      <span className="font-medium text-slate-700">{member.mobile}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400 text-xs">Contact:</span>
-                      <span className="font-medium text-slate-700 truncate max-w-[180px]">{member.activeContact}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 text-xs block">Address:</span>
-                      <span className="text-slate-700 text-xs line-clamp-2">{member.currentAddress}</span>
-                    </div>
-                  </div>
+              <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+                <div className="flex items-center gap-2">
+                  <Filter size={16} className="text-slate-400" />
+                  <select
+                    value={bloodFilter}
+                    onChange={(e) => setBloodFilter(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="ALL">All Blood Types</option>
+                    <option value="NA">NA</option>
+                    <option value="A+">A+</option>
+                    <option value="A-">A-</option>
+                    <option value="B+">B+</option>
+                    <option value="B-">B-</option>
+                    <option value="AB+">AB+</option>
+                    <option value="AB-">AB-</option>
+                    <option value="O+">O+</option>
+                    <option value="O-">O-</option>
+                  </select>
                 </div>
 
-                <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
-                  <button 
-                    onClick={() => openEditModal(member)}
-                    className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded font-medium transition"
-                  >
-                    <Edit3 size={14} /> Edit
-                  </button>
-                  {isAdmin && (
-                    <button 
-                      onClick={() => handleDeleteClick(member.id, member.name)}
-                      className="flex items-center gap-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded font-medium transition"
-                    >
-                      <Trash2 size={14} /> Delete
-                    </button>
-                  )}
+                <div className="text-sm text-slate-500 flex items-center gap-2">
+                  <span>Total: <strong className="text-slate-800">{filteredMembers.length}</strong></span>
+                  {isUsingLocal && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Local</span>}
                 </div>
               </div>
-            ))}
+            </div>
+
+            {loading ? (
+              <div className="text-center py-20 text-slate-500 font-medium">Loading database records...</div>
+            ) : filteredMembers.length === 0 ? (
+              <div className="text-center py-20 bg-white rounded-xl shadow-sm border border-slate-100">
+                <p className="text-slate-500 font-medium">No member records found.</p>
+                <p className="text-slate-400 text-sm mt-1">Try adjusting your search or blood type filter.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredMembers.map(member => (
+                  <div key={member.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
+                    <div className="p-5">
+                      <div className="flex items-start gap-4">
+                        <div className="w-16 h-16 rounded-full bg-slate-200 flex-shrink-0 overflow-hidden border border-slate-300 flex items-center justify-center cursor-pointer" onClick={() => member.photo && setFullscreenImage(member.photo)}>
+                          {member.photo ? (
+                            <img src={member.photo} alt={member.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="text-xl font-bold text-slate-500">{member.name?.[0]?.toUpperCase()}</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-bold text-lg text-slate-900 truncate">{member.name}</h3>
+                          <p className="text-xs text-indigo-600 font-semibold mt-0.5">Blood Type: {member.bloodType || 'NA'}</p>
+                          <p className="text-xs text-slate-500 mt-1">Year Survive: <span className="font-medium text-slate-700">{member.yearSurvive || 'N/A'}</span></p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 space-y-1.5 text-sm border-t border-slate-100 pt-3">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 text-xs">Age / DOB:</span>
+                          <span className="font-medium text-slate-700">{calculateAge(member.dob)} ({member.dob || 'N/A'})</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 text-xs">Mobile:</span>
+                          <span className="font-medium text-slate-700">{member.mobile}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400 text-xs">Contact:</span>
+                          <span className="font-medium text-slate-700 truncate max-w-[180px]">{member.activeContact}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-xs block">Address:</span>
+                          <span className="text-slate-700 text-xs line-clamp-2">{member.currentAddress}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+                      <button 
+                        onClick={() => openEditMemberModal(member)}
+                        className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded font-medium transition"
+                      >
+                        <Edit3 size={14} /> Edit
+                      </button>
+                      {isAdmin && (
+                        <button 
+                          onClick={() => handleDeleteMemberClick(member.id, member.name)}
+                          className="flex items-center gap-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded font-medium transition"
+                        >
+                          <Trash2 size={14} /> Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            <div className="bg-white rounded-xl shadow-sm p-4 mb-6 flex justify-between items-center">
+              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Calendar className="text-indigo-600" /> Planned Chapter Activities & Events
+              </h2>
+              <button 
+                onClick={() => { resetActivityForm(); setShowActivityModal(true); }}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium text-sm shadow transition"
+              >
+                <Calendar size={16} /> Add Activity
+              </button>
+            </div>
+
+            {activities.length === 0 ? (
+              <div className="text-center py-20 bg-white rounded-xl shadow-sm border border-slate-100">
+                <p className="text-slate-500 font-medium">No chapter activities planned yet.</p>
+                <p className="text-slate-400 text-sm mt-1">Click "Add Activity" to schedule a chapter event.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {activities.map(act => (
+                  <div key={act.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between">
+                    <div className="p-5">
+                      <div className="flex justify-between items-start gap-4">
+                        <div>
+                          <h3 className="font-bold text-lg text-slate-900">{act.title}</h3>
+                          <p className="text-xs text-indigo-600 font-semibold mt-1 flex items-center gap-1">
+                            <Calendar size={14} /> Target Date: {act.targetDate || 'TBD'}
+                          </p>
+                        </div>
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${act.accomplished ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                          {act.accomplished ? 'Accomplished' : 'Pending'}
+                        </span>
+                      </div>
+
+                      <p className="text-sm text-slate-600 mt-3 whitespace-pre-wrap">{act.description}</p>
+
+                      {act.photos && act.photos.length > 0 && (
+                        <div className="mt-4">
+                          <p className="text-xs font-semibold text-slate-500 mb-2">Attached Photos ({act.photos.length}/5):</p>
+                          <div className="flex gap-2 overflow-x-auto pb-2">
+                            {act.photos.map((pUrl, idx) => (
+                              <div key={idx} className="w-16 h-16 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden flex-shrink-0 cursor-pointer relative group" onClick={() => setFullscreenImage(pUrl)}>
+                                <img src={pUrl} alt="Activity" className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                                  <Eye size={16} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-between items-center">
+                      <button 
+                        onClick={() => handleToggleAccomplished(act)}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5 transition ${act.accomplished ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+                      >
+                        <CheckSquare size={14} /> {act.accomplished ? 'Mark as Pending' : 'Mark Accomplished'}
+                      </button>
+
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => openEditActivityModal(act)}
+                          className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded font-medium transition"
+                        >
+                          <Edit3 size={14} /> Edit
+                        </button>
+                        {isAdmin && (
+                          <button 
+                            onClick={() => handleDeleteActivityClick(act.id, act.title)}
+                            className="flex items-center gap-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 px-3 py-1.5 rounded font-medium transition"
+                          >
+                            <Trash2 size={14} /> Delete
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </main>
 
+      {}
       {showAdminModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-2">
               <Lock size={20} className="text-indigo-600" /> Admin Authentication
             </h3>
-            <p className="text-xs text-slate-500 mb-4">Enter secret admin password (`apsinian_admin`) to unlock Edit and Delete functions.</p>
+            <p className="text-xs text-slate-500 mb-4">Enter secret admin password (`apsinian_admin`) to unlock Edit, Delete, and Accomplish actions.</p>
             
             <form onSubmit={handleAdminLogin}>
               <input 
@@ -541,7 +878,7 @@ export default function App() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmitForm} className="space-y-4">
+            <form onSubmit={handleSubmitMemberForm} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
                 <input 
@@ -637,7 +974,7 @@ export default function App() {
                 <div className="flex items-center gap-3">
                   <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-xs font-medium border border-slate-300 flex items-center gap-1 transition">
                     <Camera size={14} /> Upload Image
-                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                    <input type="file" accept="image/*" onChange={handleMemberImageUpload} className="hidden" />
                   </label>
                   {formData.photo && <span className="text-xs text-emerald-600 font-medium">Image attached</span>}
                 </div>
@@ -656,6 +993,111 @@ export default function App() {
                   className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium shadow"
                 >
                   {editingId ? 'Save Changes' : 'Add Record'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showActivityModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl my-8">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-slate-900">
+                {editingActivityId ? 'Edit Chapter Activity' : 'Add New Chapter Activity'}
+              </h3>
+              <button onClick={() => setShowActivityModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitActivityForm} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Activity Title</label>
+                <input 
+                  type="text" 
+                  required
+                  value={activityData.title}
+                  onChange={(e) => setActivityData({...activityData, title: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="e.g., Annual Coastal Cleanup"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Target Date</label>
+                <input 
+                  type="date" 
+                  required
+                  value={activityData.targetDate}
+                  onChange={(e) => setActivityData({...activityData, targetDate: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Description</label>
+                <textarea 
+                  required
+                  rows="3"
+                  value={activityData.description}
+                  onChange={(e) => setActivityData({...activityData, description: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  placeholder="Details about the chapter activity..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">
+                  Activity Photos (Max 5, Auto-compressed: {activityData.photos.length}/5)
+                </label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {activityData.photos.map((pUrl, idx) => (
+                    <div key={idx} className="w-16 h-16 rounded-lg relative border border-slate-200 overflow-hidden group">
+                      <img src={pUrl} alt="Upload preview" className="w-full h-full object-cover" />
+                      <button 
+                        type="button" 
+                        onClick={() => removeActivityPhoto(idx)}
+                        className="absolute top-0.5 right-0.5 bg-red-600 text-white rounded-full p-0.5 text-xs opacity-80 hover:opacity-100"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {activityData.photos.length < 5 && (
+                  <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-xs font-medium border border-slate-300 inline-flex items-center gap-1 transition">
+                    <ImageIcon size={14} /> Upload Photos
+                    <input type="file" accept="image/*" multiple onChange={handleActivityMultipleImageUpload} className="hidden" />
+                  </label>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <input 
+                  type="checkbox" 
+                  id="accomplishedCheck"
+                  checked={activityData.accomplished}
+                  onChange={(e) => setActivityData({...activityData, accomplished: e.target.checked})}
+                  className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
+                />
+                <label htmlFor="accomplishedCheck" className="text-xs font-semibold text-slate-700">Mark as Accomplished</label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button 
+                  type="button" 
+                  onClick={() => setShowActivityModal(false)}
+                  className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg font-medium"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium shadow"
+                >
+                  {editingActivityId ? 'Save Changes' : 'Add Activity'}
                 </button>
               </div>
             </form>

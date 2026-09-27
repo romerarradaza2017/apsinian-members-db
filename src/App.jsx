@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, AlertTriangle, Camera, Filter, Calendar, CheckSquare, Image as ImageIcon, Eye, BarChart3, Clock, CheckCircle2 } from 'lucide-react';
+import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, AlertTriangle, Camera, Filter, Calendar, CheckSquare, Image as ImageIcon, Eye, BarChart3, Clock, CheckCircle2, RefreshCw } from 'lucide-react';
 
 const getEnvVar = (key, fallback) => {
   try {
@@ -121,6 +121,7 @@ export default function App() {
       setActivities(activityItems);
 
       setIsUsingLocal(false);
+      showToast("Database successfully refreshed!");
     } catch (error) {
       console.log("Switching to Local Storage mode.");
       setIsUsingLocal(true);
@@ -159,6 +160,7 @@ export default function App() {
         setActivities(sampleActivities);
         localStorage.setItem(LOCAL_STORAGE_ACTIVITIES, JSON.stringify(sampleActivities));
       }
+      showToast("Refreshed from local memory!");
     } finally {
       setLoading(false);
     }
@@ -656,7 +658,15 @@ export default function App() {
             <p className="text-indigo-200 text-sm mt-1">Members Database & Chapter Activities Directory</p>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <button 
+              onClick={fetchAllData}
+              title="Refresh database records"
+              className="flex items-center gap-1.5 bg-indigo-800 hover:bg-indigo-700 text-indigo-100 px-3 py-1.5 rounded-lg text-sm font-medium border border-indigo-700 transition"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Refresh Data
+            </button>
+
             {isAdmin ? (
               <div className="flex items-center gap-2 bg-emerald-700/80 px-3 py-1.5 rounded-lg text-sm font-medium">
                 <Unlock size={16} /> Admin Mode Active
@@ -993,7 +1003,7 @@ export default function App() {
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-2">
               <Lock size={20} className="text-indigo-600" /> Admin Authentication
             </h3>
-            <p className="text-xs text-slate-500 mb-4">Enter secret admin password (`apsinian_admin`) to unlock Edit, Delete, and Accomplish actions.</p>
+            <p className="text-xs text-slate-500 mb-4">Enter secret admin password to unlock Edit, Delete, and Accomplish actions.</p>
             
             <form onSubmit={handleAdminLogin}>
               <input 

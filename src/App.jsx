@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, AlertTriangle, Camera } from 'lucide-react';
 
-// Firebase configuration using environment variables
+// Firebase configuration using environment variables with safe defaults
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDummyKeyForPreview",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDummyKey",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "apsinian-db.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "apsinian-db",
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "apsinian-db.appspot.com",
@@ -13,8 +13,15 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:123:web:abc"
 };
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+let db = null;
+try {
+  const app = !getApps().length ? initializeApp(firebaseConfig) : getApps()[0];
+  db = getFirestore(app);
+} catch (e) {
+  console.warn("Firebase failed to initialize, using local mode.");
+}
+
+const LOCAL_STORAGE_KEY = 'apsinian_members_fallback';
 
 export default function App() {
   const [members, setMembers] = useState([]);
@@ -23,6 +30,7 @@ export default function App() {
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [isUsingLocal, setIsUsingLocal] = useState(false);
   
   // Modal & Form States
   const [showFormModal, setShowFormModal] = useState(false);
@@ -57,14 +65,36 @@ export default function App() {
   }, []);
 
   const fetchMembers = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
+      if (!import.meta.env.VITE_FIREBASE_PROJECT_ID || !db) {
+        throw new Error("No Firebase config");
+      }
       const querySnapshot = await getDocs(collection(db, 'members'));
       const items = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMembers(items);
+      setIsUsingLocal(false);
     } catch (error) {
-      console.error("Error fetching members:", error);
-      showToast("Using local storage fallback / Check Firebase setup", "error");
+      console.log("Switching to Local Storage mode.");
+      setIsUsingLocal(true);
+      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (saved) {
+        setMembers(JSON.parse(saved));
+      } else {
+        // Initial sample record
+        const sample = [{
+          id: '1',
+          name: 'Juan Dela Cruz',
+          dob: '1995-05-15',
+          bloodType: 'O+',
+          activeContact: 'juan@example.com',
+          currentAddress: 'Cebu City, Philippines',
+          mobile: '09123456789',
+          photo: ''
+        }];
+        setMembers(sample);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(sample));
+      }
     } finally {
       setLoading(false);
     }
@@ -114,7 +144,6 @@ export default function App() {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
         
-        // Compress to JPEG with 0.7 quality
         const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         setFormData(prev => ({ ...prev, photo: dataUrl }));
       };
@@ -144,21 +173,34 @@ export default function App() {
 
   const executeSave = async () => {
     try {
-      if (editingId) {
-        const docRef = doc(db, 'members', editingId);
-        await updateDoc(docRef, formData);
-        setMembers(members.map(m => m.id === editingId ? { id: editingId, ...formData } : m));
-        showToast("Record updated successfully!");
+      if (!isUsingLocal && db) {
+        if (editingId) {
+          const docRef = doc(db, 'members', editingId);
+          await updateDoc(docRef, formData);
+          setMembers(members.map(m => m.id === editingId ? { id: editingId, ...formData } : m));
+        } else {
+          const docRef = await addDoc(collection(db, 'members'), formData);
+          setMembers([...members, { id: docRef.id, ...formData }]);
+        }
       } else {
-        const docRef = await addDoc(collection(db, 'members'), formData);
-        setMembers([...members, { id: docRef.id, ...formData }]);
-        showToast("New member added successfully!");
+        // Local storage mode
+        let updatedList;
+        if (editingId) {
+          updatedList = members.map(m => m.id === editingId ? { id: editingId, ...formData } : m);
+        } else {
+          const newId = Date.now().toString();
+          updatedList = [...members, { id: newId, ...formData }];
+        }
+        setMembers(updatedList);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedList));
       }
+      
+      showToast(editingId ? "Record updated successfully!" : "New member added successfully!");
       setShowFormModal(false);
       resetForm();
     } catch (error) {
       console.error("Error saving record:", error);
-      showToast("Error saving to database", "error");
+      showToast("Error saving record", "error");
     } finally {
       setConfirmConfig({ isOpen: false });
     }
@@ -175,8 +217,14 @@ export default function App() {
 
   const executeDelete = async (id) => {
     try {
-      await deleteDoc(doc(db, 'members', id));
-      setMembers(members.filter(m => m.id !== id));
+      if (!isUsingLocal && db) {
+        await deleteDoc(doc(db, 'members', id));
+      }
+      const updatedList = members.filter(m => m.id !== id);
+      setMembers(updatedList);
+      if (isUsingLocal) {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedList));
+      }
       showToast("Record deleted successfully!");
     } catch (error) {
       console.error("Error deleting record:", error);
@@ -225,7 +273,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-12">
-      {/* Toast notification */}
       {toast && (
         <div className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-lg text-white font-medium flex items-center gap-2 transition-all ${toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`}>
           {toast.type === 'error' ? <AlertTriangle size={20} /> : <CheckCircle size={20} />}
@@ -233,7 +280,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Header */}
       <header className="bg-indigo-900 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-6 flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
@@ -268,7 +314,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 mt-8">
         <div className="bg-white rounded-xl shadow-sm p-4 mb-6 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="relative w-full sm:w-96">
@@ -281,14 +326,14 @@ export default function App() {
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
             />
           </div>
-          <div className="text-sm text-slate-500">
-            Total Members: <span className="font-semibold text-slate-800">{filteredMembers.length}</span>
+          <div className="text-sm text-slate-500 flex items-center gap-2">
+            <span>Total Members: <strong className="text-slate-800">{filteredMembers.length}</strong></span>
+            {isUsingLocal && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">Local Mode</span>}
           </div>
         </div>
 
-        {/* Grid List */}
         {loading ? (
-          <div className="text-center py-20 text-slate-500">Loading database records...</div>
+          <div className="text-center py-20 text-slate-500 font-medium">Loading database records...</div>
         ) : filteredMembers.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-xl shadow-sm border border-slate-100">
             <p className="text-slate-500 font-medium">No member records found.</p>
@@ -352,14 +397,13 @@ export default function App() {
         )}
       </main>
 
-      {/* Admin Login Modal */}
       {showAdminModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-2">
               <Lock size={20} className="text-indigo-600" /> Admin Authentication
             </h3>
-            <p className="text-xs text-slate-500 mb-4">Enter secret admin password to unlock Edit and Delete functions.</p>
+            <p className="text-xs text-slate-500 mb-4">Enter secret admin password (`apsinian_admin`) to unlock Edit and Delete functions.</p>
             
             <form onSubmit={handleAdminLogin}>
               <input 
@@ -390,7 +434,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Add / Edit Form Modal */}
       {showFormModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl my-8">
@@ -514,7 +557,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Confirmation Modal */}
       {confirmConfig.isOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl">

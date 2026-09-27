@@ -646,7 +646,7 @@ export default function App() {
         </div>
       )}
 
-      {}
+      {/* Header */}
       <header className="bg-indigo-900 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-6 flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
@@ -712,7 +712,7 @@ export default function App() {
         </div>
       </header>
 
-      {}
+      {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 mt-8">
         {activeTab === 'members' ? (
           <div>

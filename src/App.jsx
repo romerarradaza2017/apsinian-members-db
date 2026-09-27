@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, AlertTriangle, Camera, Filter, Calendar, CheckSquare, Image as ImageIcon, Eye } from 'lucide-react';
+import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, AlertTriangle, Camera, Filter, Calendar, CheckSquare, Image as ImageIcon, Eye, BarChart3, Clock, CheckCircle2 } from 'lucide-react';
 
 const getEnvVar = (key, fallback) => {
   try {
@@ -39,7 +39,7 @@ export default function App() {
   const [accessPasswordInput, setAccessPasswordInput] = useState('');
   const [accessError, setAccessError] = useState(false);
 
-  const [activeTab, setActiveTab] = useState('members'); // 'members' or 'activities'
+  const [activeTab, setActiveTab] = useState('members'); // 'members', 'activities', or 'dashboard'
 
   const [members, setMembers] = useState([]);
   const [activities, setActivities] = useState([]);
@@ -47,8 +47,13 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [bloodFilter, setBloodFilter] = useState('ALL');
+  
+  const [activitySearchTerm, setActivitySearchTerm] = useState('');
+  const [selectedActivity, setSelectedActivity] = useState(null);
+
   const [isUsingLocal, setIsUsingLocal] = useState(false);
   
   // Member Form State
@@ -107,12 +112,10 @@ export default function App() {
         throw new Error("No Firebase config");
       }
       
-      // Fetch members
       const memberSnapshot = await getDocs(collection(db, 'members'));
       const memberItems = memberSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMembers(memberItems);
 
-      // Fetch activities
       const activitySnapshot = await getDocs(collection(db, 'activities'));
       const activityItems = activitySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setActivities(activityItems);
@@ -513,6 +516,29 @@ export default function App() {
     return matchesSearch && matchesBlood;
   });
 
+  const filteredActivities = activities.filter(a =>
+    a.title?.toLowerCase().includes(activitySearchTerm.toLowerCase()) ||
+    a.description?.toLowerCase().includes(activitySearchTerm.toLowerCase()) ||
+    a.targetDate?.includes(activitySearchTerm)
+  );
+
+  // Dashboard calculations for activities
+  const totalActivities = activities.length;
+  const accomplishedActivities = activities.filter(a => a.accomplished).length;
+  const accomplishedPercentage = totalActivities > 0 ? Math.round((accomplishedActivities / totalActivities) * 100) : 0;
+
+  // Group activities per month and year (based on targetDate YYYY-MM-DD)
+  const activitiesByMonthYear = {};
+  activities.forEach(a => {
+    if (!a.targetDate) return;
+    const dateObj = new Date(a.targetDate);
+    if (isNaN(dateObj.getTime())) return;
+    const monthName = dateObj.toLocaleString('default', { month: 'long' });
+    const year = dateObj.getFullYear();
+    const key = `${monthName} ${year}`;
+    activitiesByMonthYear[key] = (activitiesByMonthYear[key] || 0) + 1;
+  });
+
   if (!isUnlocked) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
@@ -558,6 +584,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Full Screen Image Lightbox */}
       {fullscreenImage && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4" onClick={() => setFullscreenImage(null)}>
           <div className="relative max-w-4xl max-h-[90vh]">
@@ -569,6 +596,57 @@ export default function App() {
         </div>
       )}
 
+      {/* Activity Details Modal */}
+      {selectedActivity && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl relative my-8">
+            <button onClick={() => setSelectedActivity(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+              <X size={22} />
+            </button>
+
+            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold mb-2 ${selectedActivity.accomplished ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+              {selectedActivity.accomplished ? 'Accomplished' : 'Pending'}
+            </span>
+
+            <h2 className="text-xl font-bold text-slate-900">{selectedActivity.title}</h2>
+            <p className="text-xs text-indigo-600 font-semibold mt-1 flex items-center gap-1">
+              <Calendar size={14} /> Target Date: {selectedActivity.targetDate || 'TBD'}
+            </p>
+
+            <div className="mt-4 border-t border-slate-100 pt-3">
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Description</h4>
+              <p className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{selectedActivity.description}</p>
+            </div>
+
+            {selectedActivity.photos && selectedActivity.photos.length > 0 && (
+              <div className="mt-6">
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Attached Photos ({selectedActivity.photos.length}/5)</h4>
+                <div className="grid grid-cols-3 gap-2">
+                  {selectedActivity.photos.map((pUrl, idx) => (
+                    <div key={idx} className="h-24 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer relative group" onClick={() => setFullscreenImage(pUrl)}>
+                      <img src={pUrl} alt="Activity" className="w-full h-full object-cover group-hover:scale-105 transition" />
+                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white">
+                        <Eye size={18} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end">
+              <button 
+                onClick={() => setSelectedActivity(null)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-lg text-sm transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {}
       <header className="bg-indigo-900 text-white shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-6 flex flex-col md:flex-row justify-between items-center gap-4">
           <div>
@@ -600,14 +678,14 @@ export default function App() {
               >
                 <UserPlus size={18} /> Add Member
               </button>
-            ) : (
+            ) : activeTab === 'activities' ? (
               <button 
                 onClick={() => { resetActivityForm(); setShowActivityModal(true); }}
                 className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-medium shadow transition"
               >
                 <Calendar size={18} /> Add Activity
               </button>
-            )}
+            ) : null}
           </div>
         </div>
 
@@ -624,6 +702,12 @@ export default function App() {
             className={`py-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${activeTab === 'activities' ? 'border-amber-400 text-amber-300' : 'border-transparent text-indigo-200 hover:text-white'}`}
           >
             <Calendar size={16} /> Chapter Activities ({activities.length})
+          </button>
+          <button 
+            onClick={() => setActiveTab('dashboard')}
+            className={`py-3 text-sm font-medium border-b-2 transition flex items-center gap-2 ${activeTab === 'dashboard' ? 'border-amber-400 text-amber-300' : 'border-transparent text-indigo-200 hover:text-white'}`}
+          >
+            <BarChart3 size={16} /> Activities Dashboard
           </button>
         </div>
       </header>
@@ -740,33 +824,44 @@ export default function App() {
               </div>
             )}
           </div>
-        ) : (
+        ) : activeTab === 'activities' ? (
           <div>
-            <div className="bg-white rounded-xl shadow-sm p-4 mb-6 flex justify-between items-center">
-              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Calendar className="text-indigo-600" /> Planned Chapter Activities & Events
-              </h2>
-              <button 
-                onClick={() => { resetActivityForm(); setShowActivityModal(true); }}
-                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium text-sm shadow transition"
-              >
-                <Calendar size={16} /> Add Activity
-              </button>
+            <div className="bg-white rounded-xl shadow-sm p-4 mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+              <div className="relative w-full md:w-96">
+                <Search className="absolute left-3 top-3 text-slate-400" size={18} />
+                <input 
+                  type="text" 
+                  placeholder="Search activities by title or description..." 
+                  value={activitySearchTerm}
+                  onChange={(e) => setActivitySearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+                <span className="text-sm text-slate-500">Total Activities: <strong className="text-slate-800">{filteredActivities.length}</strong></span>
+                <button 
+                  onClick={() => { resetActivityForm(); setShowActivityModal(true); }}
+                  className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium text-sm shadow transition"
+                >
+                  <Calendar size={16} /> Add Activity
+                </button>
+              </div>
             </div>
 
-            {activities.length === 0 ? (
+            {filteredActivities.length === 0 ? (
               <div className="text-center py-20 bg-white rounded-xl shadow-sm border border-slate-100">
-                <p className="text-slate-500 font-medium">No chapter activities planned yet.</p>
-                <p className="text-slate-400 text-sm mt-1">Click "Add Activity" to schedule a chapter event.</p>
+                <p className="text-slate-500 font-medium">No chapter activities found.</p>
+                <p className="text-slate-400 text-sm mt-1">Try adjusting your search query or click "Add Activity".</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {activities.map(act => (
-                  <div key={act.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between">
-                    <div className="p-5">
+                {filteredActivities.map(act => (
+                  <div key={act.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
+                    <div className="p-5 cursor-pointer" onClick={() => setSelectedActivity(act)}>
                       <div className="flex justify-between items-start gap-4">
                         <div>
-                          <h3 className="font-bold text-lg text-slate-900">{act.title}</h3>
+                          <h3 className="font-bold text-lg text-slate-900 hover:text-indigo-600 transition">{act.title}</h3>
                           <p className="text-xs text-indigo-600 font-semibold mt-1 flex items-center gap-1">
                             <Calendar size={14} /> Target Date: {act.targetDate || 'TBD'}
                           </p>
@@ -776,10 +871,10 @@ export default function App() {
                         </span>
                       </div>
 
-                      <p className="text-sm text-slate-600 mt-3 whitespace-pre-wrap">{act.description}</p>
+                      <p className="text-sm text-slate-600 mt-3 line-clamp-2">{act.description}</p>
 
                       {act.photos && act.photos.length > 0 && (
-                        <div className="mt-4">
+                        <div className="mt-4" onClick={(e) => e.stopPropagation()}>
                           <p className="text-xs font-semibold text-slate-500 mb-2">Attached Photos ({act.photos.length}/5):</p>
                           <div className="flex gap-2 overflow-x-auto pb-2">
                             {act.photos.map((pUrl, idx) => (
@@ -825,10 +920,73 @@ export default function App() {
               </div>
             )}
           </div>
+        ) : (
+          <div className="space-y-6">
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <BarChart3 className="text-indigo-600" /> Chapter Activities Performance Dashboard
+            </h2>
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Accomplished Rate</p>
+                  <h3 className="text-3xl font-extrabold text-emerald-600 mt-1">{accomplishedPercentage}%</h3>
+                  <p className="text-xs text-slate-500 mt-1">{accomplishedActivities} of {totalActivities} activities completed</p>
+                </div>
+                <div className="w-14 h-14 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl">
+                  <CheckCircle2 size={28} />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Planned</p>
+                  <h3 className="text-3xl font-extrabold text-indigo-600 mt-1">{totalActivities}</h3>
+                  <p className="text-xs text-slate-500 mt-1">Total chapter events scheduled</p>
+                </div>
+                <div className="w-14 h-14 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl">
+                  <Calendar size={28} />
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Pending Activities</p>
+                  <h3 className="text-3xl font-extrabold text-amber-600 mt-1">{totalActivities - accomplishedActivities}</h3>
+                  <p className="text-xs text-slate-500 mt-1">Activities yet to be accomplished</p>
+                </div>
+                <div className="w-14 h-14 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center text-2xl">
+                  <Clock size={28} />
+                </div>
+              </div>
+            </div>
+
+            {/* Activities Breakdown Per Month and Year */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+              <h3 className="font-bold text-lg text-slate-900 mb-4">Activities Breakdown per Month & Year</h3>
+              {Object.keys(activitiesByMonthYear).length === 0 ? (
+                <p className="text-sm text-slate-500">No scheduled activities with valid target dates yet.</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {Object.entries(activitiesByMonthYear).map(([period, count]) => (
+                    <div key={period} className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex justify-between items-center">
+                      <span className="font-medium text-slate-700 text-sm flex items-center gap-2">
+                        <Calendar size={16} className="text-indigo-600" /> {period}
+                      </span>
+                      <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full text-xs font-bold">
+                        {count} {count === 1 ? 'activity' : 'activities'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </main>
 
-      {}
+      {/* Admin Login Modal */}
       {showAdminModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl">
@@ -866,6 +1024,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Member Form Modal */}
       {showFormModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl my-8">
@@ -1000,6 +1159,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Activity Form Modal */}
       {showActivityModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl my-8">
@@ -1105,6 +1265,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Confirmation Modal */}
       {confirmConfig.isOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl">

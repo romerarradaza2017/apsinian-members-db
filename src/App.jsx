@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, AlertTriangle, Camera, Filter, Calendar, CheckSquare, Image as ImageIcon, Eye, BarChart3, Clock, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Shield, UserPlus, Search, Edit3, Trash2, Lock, Unlock, X, CheckCircle, Camera, Filter, Calendar, CheckSquare, Image as ImageIcon, Eye, BarChart3, Clock, CheckCircle2, RefreshCw } from 'lucide-react';
 
 const getEnvVar = (key, fallback) => {
   try {
@@ -53,6 +53,7 @@ export default function App() {
   
   const [activitySearchTerm, setActivitySearchTerm] = useState('');
   const [selectedActivity, setSelectedActivity] = useState(null);
+  const [selectedMember, setSelectedMember] = useState(null); // State for member detail view modal
 
   const [isUsingLocal, setIsUsingLocal] = useState(false);
   
@@ -524,12 +525,10 @@ export default function App() {
     a.targetDate?.includes(activitySearchTerm)
   );
 
-  // Dashboard calculations for activities
   const totalActivities = activities.length;
   const accomplishedActivities = activities.filter(a => a.accomplished).length;
   const accomplishedPercentage = totalActivities > 0 ? Math.round((accomplishedActivities / totalActivities) * 100) : 0;
 
-  // Group activities per month and year (based on targetDate YYYY-MM-DD)
   const activitiesByMonthYear = {};
   activities.forEach(a => {
     if (!a.targetDate) return;
@@ -594,6 +593,73 @@ export default function App() {
               <X size={28} />
             </button>
             <img src={fullscreenImage} alt="Fullscreen preview" className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" />
+          </div>
+        </div>
+      )}
+
+      {/* Member Details Modal */}
+      {selectedMember && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative my-8">
+            <button onClick={() => setSelectedMember(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
+              <X size={22} />
+            </button>
+
+            <div className="flex flex-col items-center text-center">
+              <div className="w-24 h-24 rounded-full bg-slate-200 overflow-hidden border-2 border-indigo-500 shadow-md mb-3 cursor-pointer flex items-center justify-center" onClick={() => selectedMember.photo && setFullscreenImage(selectedMember.photo)}>
+                {selectedMember.photo ? (
+                  <img src={selectedMember.photo} alt={selectedMember.name} className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-3xl font-bold text-slate-500">{selectedMember.name?.[0]?.toUpperCase()}</span>
+                )}
+              </div>
+              <h2 className="text-xl font-bold text-slate-900">{selectedMember.name}</h2>
+              <span className="inline-block px-3 py-0.5 bg-indigo-100 text-indigo-800 rounded-full text-xs font-bold mt-1">
+                Blood Type: {selectedMember.bloodType || 'NA'}
+              </span>
+            </div>
+
+            <div className="mt-6 space-y-3 text-sm border-t border-slate-100 pt-4">
+              <div className="flex justify-between py-1 border-b border-slate-50">
+                <span className="text-slate-400 font-medium">Age / Date of Birth:</span>
+                <span className="font-semibold text-slate-800">{calculateAge(selectedMember.dob)} ({selectedMember.dob || 'N/A'})</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-50">
+                <span className="text-slate-400 font-medium">Year Survive:</span>
+                <span className="font-semibold text-slate-800">{selectedMember.yearSurvive || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-50">
+                <span className="text-slate-400 font-medium">Mobile Number:</span>
+                <span className="font-semibold text-slate-800 font-mono">{selectedMember.mobile || 'N/A'}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-50">
+                <span className="text-slate-400 font-medium">Active Contact:</span>
+                <span className="font-semibold text-slate-800 truncate max-w-[200px]">{selectedMember.activeContact || 'N/A'}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 font-medium block mb-1">Current Address:</span>
+                <p className="text-slate-800 bg-slate-50 p-2.5 rounded-lg border border-slate-200 text-xs leading-relaxed">{selectedMember.currentAddress || 'N/A'}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end gap-2">
+              <button 
+                onClick={() => {
+                  const m = selectedMember;
+                  setSelectedMember(null);
+                  openEditMemberModal(m);
+                }}
+                className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-medium rounded-lg text-sm transition flex items-center gap-1"
+              >
+                <Edit3 size={16} /> Edit Record
+              </button>
+              <button 
+                onClick={() => setSelectedMember(null)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-lg text-sm transition"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -776,10 +842,22 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredMembers.map(member => (
-                  <div key={member.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md transition">
+                  <div 
+                    key={member.id} 
+                    onClick={() => setSelectedMember(member)}
+                    className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col justify-between hover:shadow-md hover:border-indigo-300 transition cursor-pointer"
+                  >
                     <div className="p-5">
                       <div className="flex items-start gap-4">
-                        <div className="w-16 h-16 rounded-full bg-slate-200 flex-shrink-0 overflow-hidden border border-slate-300 flex items-center justify-center cursor-pointer" onClick={() => member.photo && setFullscreenImage(member.photo)}>
+                        <div 
+                          className="w-16 h-16 rounded-full bg-slate-200 flex-shrink-0 overflow-hidden border border-slate-300 flex items-center justify-center" 
+                          onClick={(e) => {
+                            if (member.photo) {
+                              e.stopPropagation();
+                              setFullscreenImage(member.photo);
+                            }
+                          }}
+                        >
                           {member.photo ? (
                             <img src={member.photo} alt={member.name} className="w-full h-full object-cover" />
                           ) : (
@@ -787,7 +865,7 @@ export default function App() {
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-lg text-slate-900 truncate">{member.name}</h3>
+                          <h3 className="font-bold text-lg text-slate-900 truncate hover:text-indigo-600 transition">{member.name}</h3>
                           <p className="text-xs text-indigo-600 font-semibold mt-0.5">Blood Type: {member.bloodType || 'NA'}</p>
                           <p className="text-xs text-slate-500 mt-1">Year Survive: <span className="font-medium text-slate-700">{member.yearSurvive || 'N/A'}</span></p>
                         </div>
@@ -813,7 +891,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-end gap-2">
+                    <div className="bg-slate-50 px-5 py-3 border-t border-slate-100 flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                       <button 
                         onClick={() => openEditMemberModal(member)}
                         className="flex items-center gap-1 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 px-3 py-1.5 rounded font-medium transition"
@@ -1011,7 +1089,7 @@ export default function App() {
                 placeholder="Enter secret password" 
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4 font-mono"
                 autoFocus
               />
               <div className="flex justify-end gap-2">
@@ -1110,7 +1188,7 @@ export default function App() {
                   placeholder="09XXXXXXXXX or +639XXXXXXXXX"
                   value={formData.mobile}
                   onChange={(e) => setFormData({...formData, mobile: e.target.value})}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
                 />
               </div>
 
